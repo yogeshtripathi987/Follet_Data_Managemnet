@@ -1,0 +1,9 @@
+drop table cross_product_group_bkp;
+drop table `oracle_source_data_bkp`;
+drop table `processed_oracle_data_bkp`;
+drop table `sf_push_data_input_bkp`;
+
+create table cross_product_group_bkp as select * from cross_product_group;
+create table oracle_source_data_bkp as select * from oracle_source_data;
+create table processed_oracle_data_bkp as select * from processed_oracle_data;
+create table sf_push_data_input_bkp as select * from sf_push_data_input;

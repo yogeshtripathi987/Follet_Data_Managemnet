@@ -1,0 +1,28 @@
+with IMS_ASPEN as (
+select distinct contract_id,
+case when cross_product.Quantity_UOM__c='Students' then student_count else Count_School end as Quantity,
+case when cross_product.Quantity_UOM__c='Students' 
+then src.PER_STUDENT_PRICE else src.SELLING_PRICE*src.max_CONTRACT_MONTHS end as price
+from `follet_data_migration`.`processed_data_unfiltered` src,
+`follet_data_migration`.`sf_cross_product` cross_product 
+where src.sf_cross_Pdct_id=cross_product.id 
+and SUPPORT_ITEMNO='95206P')
+select src.CONTRACT_ID, src.SUPPORT_ITEMNO,src.Count_School, src.Row_identifier,  src.sold_to_num_acct_id, src.sf_contract_id, src.CURRENCY_CODE, 
+case when
+src.SUPPORT_ITEMNO='95216P' then coalesce(IMS_ASPEN.price,0)
+when src.SUPPORT_ITEMNO!='95216P' and cross_product.Quantity_UOM__c='Students' 
+then coalesce(src.PER_STUDENT_PRICE,0) else coalesce(src.SELLING_PRICE*src.max_CONTRACT_MONTHS,0) end as price,
+pricedim.id as Dimension_id, src.sf_cross_Pdct_id, src.max_CONTRACT_MONTHS/12 as Prorate, 
+case when  src.SUPPORT_ITEMNO='95216P' then IMS_ASPEN.Quantity when src.SUPPORT_ITEMNO!='95216P' and cross_product.Quantity_UOM__c='Students' 
+then src.student_count else src.Count_School end as Quantity, src.UPLIFT_PCT as UPLIFT_PCT, 
+STR_TO_DATE(replace(src.START_DATE,'-','/'),'%m/%d/%Y')  as START_DATE, STR_TO_DATE(replace(src.end_date,'-','/'),'%m/%d/%Y')  as end_date, 
+(@row_number:=@row_number + 1) AS row_num , src.ACCOUNT_NUMBER_CONCAT , src.ACCOUNT_NUMBER_acct_id , src.ACCOUNT_NUMBER_acct_name , src.sf_quote_line_id
+from `sf_push_data_input` src 
+left join `sf_cross_product` cross_product
+on src.sf_cross_Pdct_id=cross_product.id
+left join 
+(select id, name,CurrencyIsoCode,SBQQ__Product__c from `sf_pricedim` where SBQQ__Type__c='Year') pricedim
+on src.sf_cross_Pdct_id=pricedim.SBQQ__Product__c
+and src.CURRENCY_CODE=pricedim.CurrencyIsoCode
+left join IMS_ASPEN
+on src.CONTRACT_ID=IMS_ASPEN.CONTRACT_ID

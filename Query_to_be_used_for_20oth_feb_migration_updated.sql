@@ -1,0 +1,304 @@
+select con.* --support_status, contract_org, count(distinct contract_number) cnt
+    from
+        (select --count(distinct ch.contract_number),
+                 pp.party_number parent_account_number,
+                 op.party_number account_number,
+                 cis.name instance_status,
+                 cl.sts_code support_status,
+                 cinv.segment1 itemno,
+                 cinv.description item_description,
+                 case when ol.ordered_item = rc.firstyr_support_itemno
+                      then rc.support_itemno
+                      else ol.ordered_item
+                 end support_itemno,
+                 decode(pt.prodline,'SUPPORT-SW',pt.prodfamily,pt.prodline) prodline,
+                 decode(pt.prodline,'SUPPORT-SW',pt.prodgroup,pt.prodfamily) prodfamily,
+                 decode(pt.platform,'CLOUD','FSS HOSTED','OLS','ECS','ONPREM') platform,
+                 ch.contract_number, ch.id contract_id, --ch.authoring_org_id contract_orgid,
+                 decode(ch.authoring_org_id,83,'FSS','X2') contract_org, 
+                 ch.inv_organization_id contract_inv_orgid,
+                 decode(ch.inv_organization_id,85,'FSS',84, 'FSS','X2') contract_inv_org, 
+                 ch.cust_po_number, round(cl.price_unit,2) price_unit, cl.currency_code,
+                 to_char(cl.start_date,'MM-DD-YYYY') start_date, to_char(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated),'MM-DD-YYYY') end_date,
+                 cl.upg_orig_system_ref_id svc_line_id, ci.object1_id1 instance_id,
+                 regexp_replace(oh.orig_sys_document_ref,'QUOTE','') quote,
+                 round(cl.price_unit/round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0),5) selling_price,                    
+                 to_char(last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)),'MM-DD-YYYY') current_exprn_date,
+                 to_char(last_day(add_months(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated),12)),'MM-DD-YYYY') new_exprn_date,
+                 case when opa.pricing_context = 'FSC_PER_PUPIL_PRICING'
+                        and opa.pricing_attribute1 is not null
+                      then opa.pricing_attribute1
+                      else NULL
+                 end student_count,
+                 round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0) contract_months,
+                 --ep.startdate new_price_start_date,
+                 case when last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) > '01-MAR-2024' --if the current contract ends later than 2/29/24 they get the 24/25 price
+                        and ep1.status = 'A'
+                      then round(nvl(nvl(ep1.override_annual_amt,ep1.annual_amt),(cl.price_unit/months_between(cl.end_date,cl.start_date)*12)),2)
+                      when last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) < '01-MAR-2024' --if the current contract ends later than 2/29/24 they get the 24/25 price
+                        and ep1.status = 'A'
+                      then round(nvl(nvl(ep.override_annual_amt,ep.annual_amt),(cl.price_unit/months_between(cl.end_date,cl.start_date)*12)),2)
+                      else round(cl.price_unit/round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0)*12,2)
+                 end new_yrly_price,
+                 case when last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) > '01-MAR-2024' --if the current contract ends later than 2/29/24 they get the 24/25 price
+                        and ep1.status = 'A'
+                      then round(nvl(nvl(ep1.override_monthly_amt,ep1.monthly_amount),cl.price_unit/months_between(cl.end_date,cl.start_date)),5)
+                      when last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) < '01-MAR-2024' --if the current contract ends later than 2/29/24 they get the 24/25 price
+                        and ep.status = 'A'
+                      then round(nvl(nvl(ep.override_monthly_amt,ep.monthly_amount),cl.price_unit/months_between(cl.end_date,cl.start_date)),5)
+                      else round(cl.price_unit/round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0),5)
+                 end new_mthly_price,
+                 round((case when round(cl.price_unit/months_between(cl.end_date,cl.start_date),5) = 0
+                      then 0
+                      when round(cl.price_unit/months_between(cl.end_date,cl.start_date),5) = 
+                           nvl(round(nvl(ep.override_monthly_amt,ep.monthly_amount),5),round(cl.price_unit/months_between(cl.end_date,cl.start_date),5))
+                      then 0
+                      when round(cl.price_unit/months_between(cl.end_date,cl.start_date),5) =
+                           nvl(round(nvl(ep1.override_monthly_amt,ep1.monthly_amount),5),round(cl.price_unit/months_between(cl.end_date,cl.start_date),5))
+                      then 0
+                      when last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) > '01-MAR-2024' --if the current contract ends later than 2/29/24 they get the 24/25 price
+                        and ep1.status = 'A'
+                      then (nvl(ep1.override_monthly_amt,ep1.monthly_amount)-
+                      --have to round the months on the current contract to 0 to get the months between accurately
+                           (cl.price_unit/round(months_between(cl.end_date,cl.start_date),0)))/(cl.price_unit/round(months_between(cl.end_date,cl.start_date),0))*100
+                      else (nvl(ep.override_monthly_amt,ep.monthly_amount) -
+                           (cl.price_unit/round(months_between(cl.end_date,cl.start_date),0)))/(cl.price_unit/round(months_between(cl.end_date,cl.start_date),0))*100
+                 end),2) uplift_pct,
+                 case when ch.authoring_org_id = 186
+                      then 'ASPEN'
+                      when ch.authoring_org_id = 83
+                        and nvl(p.country,'X') in ('CA','US')
+                      then 'DOMESTIC'
+                      when ch.authoring_org_id = 83
+                        and nvl(p.country,'X') != 'US'
+                      then 'INTERNATIONAL'
+                      else 'QUESTION'
+                 end renewal_opp_type,
+                 oh.sold_to_org_id, oh.invoice_to_org_id, oh.ship_to_org_id, oh.order_number,
+                 --ol.inventory_Item_id item_id,
+                  inv.description, 
+                  op.party_name owner_customer, 
+                  pp.party_name parent_customer,
+                 ca.account_number soldto_num, p.party_name soldto_customer,
+                 sbv."Bill Party Number" billto_num, sbv."Bill Party Name" billto_customer,
+                 sbv."Ship Party Number" shipto_num, sbv."Ship Party Name" shipto_customer,
+                 row_number() over (partition by ci.object1_id1 --, ol.ordered_item 
+                                    order by decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated) desc) rn,
+                 --nvl(ca.attribute8,'N') autorenew, --if we can change the Value Set for this attribute we can use this instead of the following
+                 --this is the list of customers from Michele T that need to be set up for "full touch" in CPQ renewals 
+                 case when ca.account_number in 
+                            ('0107893','0139762','0161335','0204260','0217037','0226692','0249147','0408439','0410241','0410499',
+                             '0413269','0415288','0421635','0423942','0425118','0431060','0441943','0451254','0451774','0453214',
+                             '0457150','0462310','0465699','0466358','0469397','0475362','0475681','0479531','0503784','0509911',
+                             '0513589','0518834','0543258','0550690','0805010','0902295','0903530','0906350','0911888','0914971',
+                             '0918360','0920130','0923085','0927376','0933749','0941977','0955020','0958175','0960615','0963315',
+                             '0964395','0968745','0971012','0973350','0984510','0989155','0991395','1000294','1003888','1005328',
+                             '1014545','1020448','1022170','1023760','1032437','1033607','1034992','1037740','1046108','1116340',
+                             '1204894','1206505','1241569','1285280','1295565','1326620','1341360','1425681','1542410','1565053',
+                             '1579508','1597240','1709160','1721740','1726589','1735870','1787565','1933480','1964914','1982398',
+                             '1993744','1995232','1996720','2105285','2168829','2194806','2201011','2251920','2268376','2280442',
+                             '2401630','2412375','2421160','2649805','2667473','2705513','2713112','3000894','3019668','3100196',
+                             '3104457','3104552','3110550','3110845','3123993','3142330','3172045','3197001','3215696','3235098',
+                             '3256898','3275005','3281250','3288201','3423228','3432045','3449635','3488601','3550434','3573368',
+                             '3601147','3603959','3611260','3634052','3800438','3900028','3900050','3903852','3917419','3929876',
+                             '4125254','4160820','4201593','4203835','4209611','4209612','4209673','4216885','4217476','4233689',
+                             '4234723','4242539','4243965','4251875','4252923','4255401','4257702','4261690','4274212','4278946',
+                             '4286540','4300944','4305425','4323854','4504040','4504978','4545456','4549768','4576242','4582006',
+                             '4592289','4620096','4621210','4627318','4628149','4661073','4802120','4841370','4851510','7010047',
+                             '7020057','7020058','7030026')
+                      then 'M'
+                      when (ca.attribute8 is null or ca.attribute8 = 'N')
+                      then 'N'
+                      when ca.attribute8 = 'Y'
+                      then 'Y'
+                      else NULL
+                 end auto_renewal,
+                 round(case when opa.pricing_context = 'FSC_PER_PUPIL_PRICING'
+                        and opa.pricing_attribute1 is not null
+                      then cl.price_unit/round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0)
+                           /opa.pricing_attribute1
+                      else NULL
+                 end,5) per_student_price,
+                 to_char(trunc(cl.last_update_date),'MM-DD-YYYY') con_line_last_updated
+            from okc.okc_k_headers_all_b ch,
+                 okc.okc_k_lines_b cl,
+                 okc.okc_k_items ci,
+                 ont.oe_order_headers_all oh,
+                 ont.oe_order_lines_all ol,
+                 ont.oe_order_price_attribs opa,
+                 inv.mtl_system_items_b inv,
+                 fscstd.fss_product_tree pt,
+                 fscstd.renewal_control rc,
+                 ar.hz_cust_accounts ca, --soldto customer
+                 ar.hz_parties p, --soldto customer
+                 apps.fsc_shipto_billto_v sbv,
+                 csi.csi_item_instances cii,
+                 inv.mtl_system_items_b cinv,
+                 csi.csi_instance_statuses cis,
+                 ar.hz_parties op, --owner party
+                 ar.hz_parties pp, -- parent party
+                 (select pp.party_number||' - '||pp.party_name parent_customer,
+                       fep.installsite_party_number,  p.party_name installsite_name,
+                       fep.itemno, round(fep.monthly_amount*12,2) annual_amt,
+                       fep.monthly_amount, fep.startdate, fep.enddate, fep.status, 
+                       fep.override_monthly_amt, NVL(round(fep.override_monthly_amt*12,2),null) override_annual_amt,
+                       fep.override_by, fep.override_creation_date,
+                       fep.override_reason, fep.rowid fep_rowid,
+                       case when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'LIBRARY MANAGER'
+                                and pt.prodgroup like 'HOSTED %'
+                            then 'HLM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'LIBRARY MANAGER'
+                                and pt.prodgroup not like 'HOSTED %'
+                            then 'LM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'RESOURCE MANAGER'
+                                and pt.prodgroup like 'HOSTED %'
+                            then 'HRM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'RESOURCE MANAGER'
+                                and pt.prodgroup not like 'HOSTED %'
+                            then 'RM'
+                            else NULL
+                        end prodline
+                    from fscstd.fss_ext_pricebook fep,
+                         ar.hz_parties p,
+                         ar.hz_parties pp,
+                         fscstd.fss_product_tree pt
+                    where fep.installsite_party_number = p.party_number
+                      and p.attribute7 = pp.party_number
+                      and pt.prodcompany = 'FSC'
+                      and pt.prodtree = 'STANDARD'
+                      and pt.itemno = fep.itemno) ep,  --this is the query from APEX #211 FSS External Pricebook
+                 (select pp.party_number||' - '||pp.party_name parent_customer,
+                       fep.installsite_party_number,  p.party_name installsite_name,
+                       fep.itemno, round(fep.monthly_amount*12,2) annual_amt,
+                       fep.monthly_amount, fep.startdate, fep.enddate, fep.status, 
+                       fep.override_monthly_amt, NVL(round(fep.override_monthly_amt*12,2),null) override_annual_amt,
+                       fep.override_by, fep.override_creation_date,
+                       fep.override_reason, fep.rowid fep_rowid,
+                       case when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'LIBRARY MANAGER'
+                                and pt.prodgroup like 'HOSTED %'
+                            then 'HLM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'LIBRARY MANAGER'
+                                and pt.prodgroup not like 'HOSTED %'
+                            then 'LM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'RESOURCE MANAGER'
+                                and pt.prodgroup like 'HOSTED %'
+                            then 'HRM'
+                            when pt.prodline = 'SUPPORT-SW'
+                                and pt.prodfamily = 'RESOURCE MANAGER'
+                                and pt.prodgroup not like 'HOSTED %'
+                            then 'RM'
+                            else NULL
+                        end prodline
+                    from fscstd.fss_ext_pricebook fep,
+                         ar.hz_parties p,
+                         ar.hz_parties pp,
+                         fscstd.fss_product_tree pt
+                    where fep.installsite_party_number = p.party_number
+                      and p.attribute7 = pp.party_number
+                      and pt.prodcompany = 'FSC'
+                      and pt.prodtree = 'STANDARD'
+                      and pt.itemno = fep.itemno) ep1
+            where 1 = 1 
+              and ch.sts_code != 'TERMINATED'  --don't want to include terminated contracts
+              and ch.authoring_org_id in (83,186) --Destiny and Aspen orgs only
+              and ch.id = cl.dnz_chr_id
+              and cl.sts_code != 'TERMINATED'  --there can be individual Lines that are terminated and don't want those
+              --and cl.dnz_chr_id = 10422296  --used for validation
+              --and cl.upg_orig_system_ref_id = 82368088  --used for validation
+              --and cl.date_terminated is not null  --used for validation
+              --and to_char(last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)),'MM-DD-YYYY') between '03-01-2024' and '05-31-2024' --put this in to capture some initial data for testing
+              and nvl(cl.date_terminated,'31-DEC-4712') != cl.start_date --some contracts were terminated to align to the prev contract end for self-hosted products
+              --these contracts are still valid for future renewal. Contracts that were terminated with a date = contract start date are full credits and not valid for renewal
+              and decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated) >= add_months(trunc(sysdate,'month'),-3) --final decision made 10/3/23 3months prior to current month
+              and round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0) != 0 --added this 1/22/24 to avoid divisor = 0 error
+              and cl.id = ci.cle_id
+              and ci.jtot_object1_code = 'OKX_CUSTPROD'
+              --and oh.order_number = '3263391' --used for validation
+              --include this if the business decides to exclude contracts originating from CPQ
+              and case when oh.attribute20 is not null   
+                         and oh.order_source_id = 1066   --this is the order source for orders originating in CPQ
+                       then NULL                                      
+                       when oh.attribute20 is not null
+                         and oh.order_source_id = 2      --this is the order source for copied orders but don't want to exclude SF Opps that went through Oracle quoting
+                         and ol.attribute18 is not null  --so have to add this to find the CQP source_line_num when the original order source is CPQ
+                       then NULL
+                       else oh.header_id
+                  end = oh.header_id
+              and oh.header_id = ol.header_id
+              --and ol.orig_sys_document_ref like 'CPQ: %'
+              and ol.line_id = cl.upg_orig_system_ref_id
+              and ol.inventory_item_id = inv.inventory_item_id
+              and opa.line_id(+) = ol.line_id
+              and inv.organization_id = ol.ship_from_org_id
+              and inv.organization_id in (85,186) --FSS & X2 only
+              and pt.inventory_item_id = inv.inventory_item_id
+              and pt.inventory_org_id = inv.organization_id
+              and pt.prodtree = 'STANDARD'
+              and pt.platform != 'XOLS'  --exclude content subscriptions no longer sold through FSS
+              --not migrating No Charge Subs or mfg warranties for hardware items below --updated 1/30/24 to exclude ACCESSIT product line
+              and pt.prodline not in ('DESTINY DISCOVER','FOLLETTSHELF','ONE SEARCH','RECEIPT PRINTER','RFID','SCANNERS','WIRELESS')   
+                                                                    --final decision 10/3/23 to include FREE stuff like FOLLETTSHELF, etc.
+              and (rc.firstyr_support_itemno = ol.ordered_item or rc.support_itemno = ol.ordered_item)
+              and ca.cust_account_id = oh.sold_to_org_id
+              and ca.customer_type = 'R'
+              and nvl(ca.attribute_category,'FSC') = 'FSC'
+              --and ca.account_number = '1285280' --used for validation
+              and p.party_id = ca.party_id
+              and p.category_code != 'INTERNAL' --Oracle does not send INTERNAL customers to SalesForce so excluding these customer/contracts
+              and p.attribute2 != 'FSS INTERNAL'
+              and sbv.header_id(+) = ol.header_id  --need this to be an outer join on bt/st because OE doesn't always select valid site addresses
+              and sbv.line_id(+) = ol.line_id --need this to be an outer join on bt/st because OE doesn't always select valid site addresses
+              and cii.instance_id = ci.object1_id1
+              and cinv.inventory_item_id = cii.inventory_item_id
+              and cinv.organization_id = cii.last_vld_organization_id
+              and cis.instance_status_id = cii.instance_status_id
+              and cis.name not in ('Disabled','EXPIRED','Migrated','No_service','Pre-Accpt') --disabled/expired products cannot be renewed & not migrating "in-flight" orders 
+              and op.party_id = cii.owner_party_id
+              and pp.party_number = op.attribute7
+              and ep.installsite_party_number(+) = op.party_number
+              and ep.itemno(+) = case when ol.ordered_item = rc.firstyr_support_itemno
+                                      then rc.support_itemno
+                                      else ol.ordered_item
+                                 end
+              and ep.status(+) = 'A'
+              and ep.startdate(+) < '01-MAR-2024'
+              and (ep.enddate is null or ep.enddate = '29-FEB-2024')
+              and ep1.installsite_party_number(+) = op.party_number
+              and ep1.itemno(+) = case when ol.ordered_item = rc.firstyr_support_itemno
+                                      then rc.support_itemno
+                                      else ol.ordered_item
+                                  end
+              and ep1.status(+) = 'A'
+              and ep1.startdate(+) >= '01-MAR-2024'
+              and ep1.enddate(+) is null
+--these conditions are here to look for different selling scenarios
+              --and decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated) < trunc(sysdate,'month')
+              --and decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated) between '01-DEC-2023' and '29-FEB-2024'
+              --and pp.party_number = '0607001'
+              --and op.party_number = '0100065'
+              --and pp.party_Number = ca.account_number --parent = sold to customer
+              --and (pp.party_number != ca.account_number and op.party_number != ca.account_number) --parent is NOT the sold to customer 13%
+              --and ca.account_number != sbv."Bill Party Number" --sold to customer is NOT the bill to customer 3%
+              --and sbv."Bill Party Number" != sbv."Ship Party Number"  --bill to customer is NOT the ship to customer 6.5%
+              --and last_day(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated)) > '29-FEB-2024'
+              --and cinv.segment1 = '48206L'
+              --and to_char(cl.start_date,'DD') != '01'  --find contracts that don't start on day 1 of a given month
+              --and round(months_between(decode(cl.date_terminated,NULL,cl.end_date,cl.date_terminated), cl.start_date),0) != 12  --look for contracts < or > 12 months
+              --and ch.contract_number = 'W1037827' --in ('W1051604','W1035754') --= 'W1061824' --used for validation
+--              and case when ol.ordered_item = rc.firstyr_support_itemno
+--                       then rc.support_itemno
+--                       else ol.ordered_item
+--                  end = '95201P'
+              ) con
+    where rn = 1 --only want to return the most current contract for each parent/site/ordered item
+--group by support_status, contract_org  --this is here to get the distinct count of contracts
+order by --support_status --this is here to get the distinct count of contracts by status
+         con.contract_id, con.support_itemno
+;

@@ -1,0 +1,17 @@
+"with
+group_contracts as 
+(select contract_id, count(1) as count from (
+select distinct contract_id, Count_School, ACCOUNT_NUMBER_CONCAT from sf_push_data_input  where Deal_type='District Member') t
+group by contract_id having count(1)>1)
+
+select contract_id, ACCOUNT_NUMBER_CONCAT,  
+sf_quote_id, ACCOUNT_NUMBER_acct_id, ACCOUNT_NUMBER_acct_name, Count_School,
+CONCAT('Group-',ROW_NUMBER() OVER (PARTITION BY contract_id)) as GROUP_NAME from (
+select distinct sf_push_data_input.contract_id, sf_push_data_input.ACCOUNT_NUMBER_CONCAT, 
+sf_push_data_input.sf_quote_id, sf_push_data_input.ACCOUNT_NUMBER_acct_id, sf_push_data_input.ACCOUNT_NUMBER_acct_name, sf_push_data_input.Count_School
+ from sf_push_data_input
+ Inner join
+ group_contracts
+ on sf_push_data_input.contract_id=group_contracts.contract_id
+ order by contract_id, Count_School
+ ) t "

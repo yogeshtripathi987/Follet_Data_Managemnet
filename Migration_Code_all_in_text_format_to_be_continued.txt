@@ -1,0 +1,453 @@
+Target table name : "cross_product_group"
+
+
+select ab.CONTRACT_ID,ab.SUPPORT_ITEMNO, ab.District_Member, ab.District_Product,ab.Single_Hosted,coalesce(DM_ID,NON_DM_ID) as sf_cross_Pdct_id, coalesce(DM_Name,NON_DM_NAME ) as sf_cross_Pdct_name,case when length(concat(ifnull(ab.District_Member,''),ifnull(ab.District_Product,''),ifnull(ab.Single_Hosted,'')))>19 then 'Multiple Group' else null end as Multiple_Group from (
+select distinct CONTRACT_ID, SUPPORT_ITEMNO, DM.id as DM_ID ,DM.Name as DM_Name, Non_dm.id as NON_DM_ID , non_dm.name as NON_DM_NAME,
+case when src.SUPPORT_ITEMNO=DM.DM_column_value then  'District Member' else Null end  as District_Member,
+case when src.SUPPORT_ITEMNO=non_dm.NON_DM_Column and non_dm.Oracle_DM_Install_Item__c is not null and non_dm.Oracle_DM_New_Item__c is not null 
+and non_dm.Oracle_DM_Renew_Item__c is not null
+ then  'District Product' else Null end as District_Product,
+ case when src.SUPPORT_ITEMNO=non_dm.NON_DM_Column and non_dm.Oracle_DM_Install_Item__c is null and non_dm.Oracle_DM_New_Item__c is null and non_dm.Oracle_DM_Renew_Item__c is null
+ then  'Single-Hosted' else Null end as Single_Hosted
+  from `follet_data_migration`.`oracle_source_data`  as src
+left join 
+(select id , name, DM_column_value from 
+(select id , name, Oracle_DM_Install_Item__c as DM_column_value from `follet_data_migration`.`sf_cross_product` where Oracle_DM_Install_Item__c is not null
+union all
+select id , name, Oracle_DM_New_Item__c as DM_column_value from `follet_data_migration`.`sf_cross_product` where Oracle_DM_New_Item__c is not null
+union all
+select id , name, Oracle_DM_Renew_Item__c as DM_column_value from `follet_data_migration`.`sf_cross_product` where Oracle_DM_Renew_Item__c is not null) DM )DM
+on src.SUPPORT_ITEMNO=DM.DM_column_value
+left join 
+( select id, name , NON_DM_Column, Oracle_DM_Install_Item__c,Oracle_DM_New_Item__c, Oracle_DM_Renew_Item__c from (
+select id , name, Oracle_New_Item__c as NON_DM_Column, Oracle_DM_Install_Item__c,Oracle_DM_New_Item__c, Oracle_DM_Renew_Item__c  from `follet_data_migration`.`sf_cross_product`
+where Oracle_New_Item__c is not null
+union all
+select id , name, Oracle_Renewal_Item__c as NON_DM_Column, Oracle_DM_Install_Item__c,Oracle_DM_New_Item__c, Oracle_DM_Renew_Item__c from `follet_data_migration`.`sf_cross_product`
+where Oracle_Renewal_Item__c is not null) NON_DM ) NON_DM
+on src.SUPPORT_ITEMNO=NON_DM.NON_DM_Column) ab;
+----------------------------------------------------------------
+
+Target Table : "processed_oracle_data"
+
+
+select CONTRACT_ID as CONTRACT_ID, SUPPORT_ITEMNO as SUPPORT_ITEMNO,
+ROW_NUMBER() OVER (PARTITION BY CONTRACT_ID ORDER BY CONTRACT_ID, SUPPORT_ITEMNO, Price_Unit, START_DATE, END_DATE, UPLIFT_PCT) as Row_identifier,
+count((ACCOUNT_NUMBER)) as Count_School, Price_Unit,
+GROUP_CONCAT(ACCOUNT_NUMBER order by ACCOUNT_NUMBER) as ACCOUNT_NUMBER_CONCAT, 
+START_DATE,END_DATE, min(CURRENCY_CODE) as CURRENCY_CODE, min(CONTRACT_NUMBER) as CONTRACT_NUMBER, min(SOLDTO_NUM) as SOLDTO_NUM, min(BILLTO_NUM) as BILLTO_NUM, 
+min(SHIPTO_NUM) as SHIPTO_NUM, max(CONTRACT_MONTHS) as max_CONTRACT_MONTHS, min(CONTRACT_ORG) as CONTRACT_ORG, min(AUTORENEW) as AUTORENEW, 
+min(RENEWAL_OPP_TYPE) as RENEWAL_OPP_TYPE, UPLIFT_PCT, min(Student_count) as Student_count, min(PRODFAMILY) as PRODFAMILY, min(sold_to_num_acct_id) as sold_to_num_acct_id, 
+min(sold_to_num_acct_name) as sold_to_num_acct_name, min(BILLTO_NUM_acct_id) as BILLTO_NUM_acct_id, min(BILLTO_NUM_acct_name) as BILLTO_NUM_acct_name,
+min(SHIPTO_NUM_acct_id) as SHIPTO_NUM_acct_id, min(SHIPTO_NUM_acct_name) as SHIPTO_NUM_acct_name, GROUP_CONCAT(ACCOUNT_NUMBER_acct_id order by ACCOUNT_NUMBER) as ACCOUNT_NUMBER_acct_id,
+GROUP_CONCAT(ACCOUNT_NUMBER_acct_name order by ACCOUNT_NUMBER) as ACCOUNT_NUMBER_acct_name, min(PER_STUDENT_PRICE) as PER_STUDENT_PRICE, 
+min(NEW_YRLY_PRICE) as NEW_YRLY_PRICE, min(NEW_MTHLY_PRICE) as NEW_MTHLY_PRICE, min(SELLING_PRICE) as SELLING_PRICE
+ from (
+select CONTRACT_ID, SUPPORT_ITEMNO,Price_Unit, ACCOUNT_NUMBER, START_DATE, END_DATE, CURRENCY_CODE, CONTRACT_NUMBER, SOLDTO_NUM, BILLTO_NUM, SHIPTO_NUM, CONTRACT_MONTHS, AUTORENEW, CONTRACT_ORG, RENEWAL_OPP_TYPE, UPLIFT_PCT , Student_count, PRODFAMILY, 
+Act1.id as sold_to_num_acct_id, Act1.name as sold_to_num_acct_name, Act2.id as BILLTO_NUM_acct_id,  Act2.name as BILLTO_NUM_acct_name, Act3.id as SHIPTO_NUM_acct_id,  Act3.name as SHIPTO_NUM_acct_name,
+Act4.id as ACCOUNT_NUMBER_acct_id,  Act4.name as ACCOUNT_NUMBER_acct_name, PER_STUDENT_PRICE, NEW_YRLY_PRICE, NEW_MTHLY_PRICE , SELLING_PRICE
+from follet_data_migration.oracle_source_data src
+left join follet_data_migration.sf_accountfull Act1
+on src.SOLDTO_NUM=Act1.Oracle_Number_EBS__c
+left join follet_data_migration.sf_accountfull Act2
+on src.BILLTO_NUM=Act2.Oracle_Number_EBS__c
+left join follet_data_migration.sf_accountfull Act3
+on src.SHIPTO_NUM=Act3.Oracle_Number_EBS__c
+left join follet_data_migration.sf_accountfull Act4
+on src.ACCOUNT_NUMBER=Act4.Oracle_Number_EBS__c) t
+group by CONTRACT_ID, SUPPORT_ITEMNO, Price_Unit, START_DATE, END_DATE, UPLIFT_PCT
+order by CONTRACT_ID, SUPPORT_ITEMNO;
+
+------------------------------------------------------------------------------
+
+
+Target Table :"Processed_data_unfiltered"
+
+
+with dealtype as (
+select contract_id, SUPPORT_ITEMNO, sf_cross_Pdct_id, sf_cross_Pdct_name, case when  Deal_type='' then 'No Group' else Deal_type end as Deal_type, Multiple_Group from (
+select contract_id, SUPPORT_ITEMNO,sf_cross_Pdct_id, sf_cross_Pdct_name,concat(coalesce(District_Member,''), coalesce(District_Product,''), coalesce(Single_Hosted,'')) 
+as Deal_type,Multiple_Group from follet_data_migration.cross_product_group) t)
+select processed_data.CONTRACT_ID, processed_data.SUPPORT_ITEMNO,processed_data.Row_identifier, processed_data.Count_School, processed_data.sum_Price_Unit, processed_data.ACCOUNT_NUMBER_CONCAT, 
+processed_data.START_DATE, processed_data.END_DATE, processed_data.CURRENCY_CODE, processed_data.CONTRACT_NUMBER, processed_data.SOLDTO_NUM, processed_data.BILLTO_NUM, 
+processed_data.SHIPTO_NUM, processed_data.max_CONTRACT_MONTHS, processed_data.CONTRACT_ORG, processed_data.AUTORENEW, processed_data.RENEWAL_OPP_TYPE, 
+processed_data.UPLIFT_PCT, processed_data.Student_count, processed_data.PRODFAMILY, processed_data.sold_to_num_acct_id, processed_data.sold_to_num_acct_name, 
+processed_data.BILLTO_NUM_acct_id, processed_data.BILLTO_NUM_acct_name, processed_data.SHIPTO_NUM_acct_id, processed_data.SHIPTO_NUM_acct_name, processed_data.ACCOUNT_NUMBER_acct_id, 
+processed_data.ACCOUNT_NUMBER_acct_name , dealtype.sf_cross_Pdct_id, dealtype.sf_cross_Pdct_name, dealtype.Deal_type,
+dealtype.Multiple_Group, processed_data.PER_STUDENT_PRICE, processed_data.NEW_YRLY_PRICE, processed_data.NEW_MTHLY_PRICE, processed_data.SELLING_PRICE
+from follet_data_migration.processed_oracle_data processed_data, dealtype
+where processed_data.contract_id=dealtype.contract_id
+and processed_data.SUPPORT_ITEMNO=dealtype.SUPPORT_ITEMNO;
+
+
+--------------------------------------------------------------------------------
+
+--update multiple group records
+update processed_data_unfiltered set Multiple_Group=null , Deal_type='District Member' where deal_type='District MemberDistrict Product' 
+and SUPPORT_ITEMNO in ('48310P','48310S')
+--------------------------------------------------------------------------------------
+
+---Aspen Error records
+Target Table :"Apsen_Error_Records"
+
+SELECT `processed_data_unfiltered`.`CONTRACT_ID`,
+    `processed_data_unfiltered`.`SUPPORT_ITEMNO`,
+    `processed_data_unfiltered`.`Row_identifier`,
+    `processed_data_unfiltered`.`Count_School`,
+    `processed_data_unfiltered`.`sum_Price_Unit`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_CONCAT`,
+    `processed_data_unfiltered`.`START_DATE`,
+    `processed_data_unfiltered`.`END_DATE`,
+    `processed_data_unfiltered`.`CURRENCY_CODE`,
+    `processed_data_unfiltered`.`CONTRACT_NUMBER`,
+    `processed_data_unfiltered`.`SOLDTO_NUM`,
+    `processed_data_unfiltered`.`BILLTO_NUM`,
+    `processed_data_unfiltered`.`SHIPTO_NUM`,
+    `processed_data_unfiltered`.`max_CONTRACT_MONTHS`,
+    `processed_data_unfiltered`.`CONTRACT_ORG`,
+    `processed_data_unfiltered`.`AUTORENEW`,
+    `processed_data_unfiltered`.`RENEWAL_OPP_TYPE`,
+    `processed_data_unfiltered`.`UPLIFT_PCT`,
+    `processed_data_unfiltered`.`Student_count`,
+    `processed_data_unfiltered`.`PRODFAMILY`,
+    `processed_data_unfiltered`.`sold_to_num_acct_id`,
+    `processed_data_unfiltered`.`sold_to_num_acct_name`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_id`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_name`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_id`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_name`,
+    `processed_data_unfiltered`.`Deal_type`,
+    `processed_data_unfiltered`.`Multiple_Group`,
+    `processed_data_unfiltered`.`PER_STUDENT_PRICE`,
+    `processed_data_unfiltered`.`NEW_YRLY_PRICE`,
+    `processed_data_unfiltered`.`NEW_MTHLY_PRICE`,
+    `processed_data_unfiltered`.`SELLING_PRICE`
+FROM `follet_data_migration`.`processed_data_unfiltered` 
+where contract_id in (
+select contract_id from `follet_data_migration`.`processed_data_unfiltered`  where SUPPORT_ITEMNO='95216P'
+and contract_id not in (
+select contract_id from `follet_data_migration`.`processed_data_unfiltered`  where SUPPORT_ITEMNO='95206P'));
+
+-----------------------------------------------------------------------------------------------------------------
+
+
+
+
+---"Multiple_group_error_records"
+Target Table :"Multiple_group_error_records"
+Multiple_group_error_records"
+
+
+SELECT `processed_data_unfiltered`.`CONTRACT_ID`,
+    `processed_data_unfiltered`.`SUPPORT_ITEMNO`,
+    `processed_data_unfiltered`.`Row_identifier`,
+    `processed_data_unfiltered`.`Count_School`,
+    `processed_data_unfiltered`.`sum_Price_Unit`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_CONCAT`,
+    `processed_data_unfiltered`.`START_DATE`,
+    `processed_data_unfiltered`.`END_DATE`,
+    `processed_data_unfiltered`.`CURRENCY_CODE`,
+    `processed_data_unfiltered`.`CONTRACT_NUMBER`,
+    `processed_data_unfiltered`.`SOLDTO_NUM`,
+    `processed_data_unfiltered`.`BILLTO_NUM`,
+    `processed_data_unfiltered`.`SHIPTO_NUM`,
+    `processed_data_unfiltered`.`max_CONTRACT_MONTHS`,
+    `processed_data_unfiltered`.`CONTRACT_ORG`,
+    `processed_data_unfiltered`.`AUTORENEW`,
+    `processed_data_unfiltered`.`RENEWAL_OPP_TYPE`,
+    `processed_data_unfiltered`.`UPLIFT_PCT`,
+    `processed_data_unfiltered`.`Student_count`,
+    `processed_data_unfiltered`.`PRODFAMILY`,
+    `processed_data_unfiltered`.`sold_to_num_acct_id`,
+    `processed_data_unfiltered`.`sold_to_num_acct_name`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_id`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_name`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_id`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_name`,
+    `processed_data_unfiltered`.`Deal_type`,
+    `processed_data_unfiltered`.`Multiple_Group`,
+    `processed_data_unfiltered`.`PER_STUDENT_PRICE`,
+    `processed_data_unfiltered`.`NEW_YRLY_PRICE`,
+    `processed_data_unfiltered`.`NEW_MTHLY_PRICE`,
+    `processed_data_unfiltered`.`SELLING_PRICE`
+FROM `follet_data_migration`.`processed_data_unfiltered` 
+where contract_id in (
+select contract_id from `follet_data_migration`.`processed_data_unfiltered` where Multiple_Group is not null
+);
+
+
+
+
+-------------------"Contracts_without_Account_No"-------------------
+Target Table "Contracts_without_Account_No"
+"Contracts_without_Account_No"
+
+"SELECT `processed_data_unfiltered`.`CONTRACT_ID`,
+    `processed_data_unfiltered`.`SUPPORT_ITEMNO`,
+    `processed_data_unfiltered`.`Row_identifier`,
+    `processed_data_unfiltered`.`Count_School`,
+    `processed_data_unfiltered`.`sum_Price_Unit`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_CONCAT`,
+    `processed_data_unfiltered`.`START_DATE`,
+    `processed_data_unfiltered`.`END_DATE`,
+    `processed_data_unfiltered`.`CURRENCY_CODE`,
+    `processed_data_unfiltered`.`CONTRACT_NUMBER`,
+    `processed_data_unfiltered`.`SOLDTO_NUM`,
+    `processed_data_unfiltered`.`BILLTO_NUM`,
+    `processed_data_unfiltered`.`SHIPTO_NUM`,
+    `processed_data_unfiltered`.`max_CONTRACT_MONTHS`,
+    `processed_data_unfiltered`.`CONTRACT_ORG`,
+    `processed_data_unfiltered`.`AUTORENEW`,
+    `processed_data_unfiltered`.`RENEWAL_OPP_TYPE`,
+    `processed_data_unfiltered`.`UPLIFT_PCT`,
+    `processed_data_unfiltered`.`Student_count`,
+    `processed_data_unfiltered`.`PRODFAMILY`,
+    `processed_data_unfiltered`.`sold_to_num_acct_id`,
+    `processed_data_unfiltered`.`sold_to_num_acct_name`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_id`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_name`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_id`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_name`,
+    `processed_data_unfiltered`.`Deal_type`,
+    `processed_data_unfiltered`.`Multiple_Group`,
+    `processed_data_unfiltered`.`PER_STUDENT_PRICE`,
+    `processed_data_unfiltered`.`NEW_YRLY_PRICE`,
+    `processed_data_unfiltered`.`NEW_MTHLY_PRICE`,
+    `processed_data_unfiltered`.`SELLING_PRICE`
+FROM `follet_data_migration`.`processed_data_unfiltered` 
+where contract_id in (
+select contract_id from `follet_data_migration`.`processed_data_unfiltered` where sold_to_num_acct_id is null
+);
+
+
+-------------------"Filtered_contracts"-------------------
+"Filtered_contracts"
+Target Table "Filtered_contracts"
+"Filtered_contracts"
+
+
+"SELECT `processed_data_unfiltered`.`CONTRACT_ID`,
+    `processed_data_unfiltered`.`SUPPORT_ITEMNO`,
+    `processed_data_unfiltered`.`Row_identifier`,
+    `processed_data_unfiltered`.`Count_School`,
+    `processed_data_unfiltered`.`sum_Price_Unit`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_CONCAT`,
+    `processed_data_unfiltered`.`START_DATE`,
+    `processed_data_unfiltered`.`END_DATE`,
+    `processed_data_unfiltered`.`CURRENCY_CODE`,
+    `processed_data_unfiltered`.`CONTRACT_NUMBER`,
+    `processed_data_unfiltered`.`SOLDTO_NUM`,
+    `processed_data_unfiltered`.`BILLTO_NUM`,
+    `processed_data_unfiltered`.`SHIPTO_NUM`,
+    `processed_data_unfiltered`.`max_CONTRACT_MONTHS`,
+    `processed_data_unfiltered`.`CONTRACT_ORG`,
+    `processed_data_unfiltered`.`AUTORENEW`,
+    `processed_data_unfiltered`.`RENEWAL_OPP_TYPE`,
+    `processed_data_unfiltered`.`UPLIFT_PCT`,
+    `processed_data_unfiltered`.`Student_count`,
+    `processed_data_unfiltered`.`PRODFAMILY`,
+    `processed_data_unfiltered`.`sold_to_num_acct_id`,
+    `processed_data_unfiltered`.`sold_to_num_acct_name`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_id`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_name`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_id`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_name`,
+    `processed_data_unfiltered`.`Deal_type`,
+    `processed_data_unfiltered`.`Multiple_Group`,
+    `processed_data_unfiltered`.`PER_STUDENT_PRICE`,
+    `processed_data_unfiltered`.`NEW_YRLY_PRICE`,
+    `processed_data_unfiltered`.`NEW_MTHLY_PRICE`,
+    `processed_data_unfiltered`.`SELLING_PRICE`
+FROM `follet_data_migration`.`processed_data_unfiltered` 
+where contract_number in (
+'W1057779'
+)"
+
+
+
+---------- split the records into 2 conditions 
+
+Source : 
+"SELECT `processed_data_unfiltered`.`CONTRACT_ID`,
+    `processed_data_unfiltered`.`SUPPORT_ITEMNO`,
+    `processed_data_unfiltered`.`Row_identifier`,
+    `processed_data_unfiltered`.`Count_School`,
+    `processed_data_unfiltered`.`sum_Price_Unit`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_CONCAT`,
+    `processed_data_unfiltered`.`START_DATE`,
+    `processed_data_unfiltered`.`END_DATE`,
+    `processed_data_unfiltered`.`CURRENCY_CODE`,
+    `processed_data_unfiltered`.`CONTRACT_NUMBER`,
+    `processed_data_unfiltered`.`SOLDTO_NUM`,
+    `processed_data_unfiltered`.`BILLTO_NUM`,
+    `processed_data_unfiltered`.`SHIPTO_NUM`,
+    `processed_data_unfiltered`.`max_CONTRACT_MONTHS`,
+    `processed_data_unfiltered`.`CONTRACT_ORG`,
+    `processed_data_unfiltered`.`AUTORENEW`,
+    `processed_data_unfiltered`.`RENEWAL_OPP_TYPE`,
+    `processed_data_unfiltered`.`UPLIFT_PCT`,
+    `processed_data_unfiltered`.`Student_count`,
+    `processed_data_unfiltered`.`PRODFAMILY`,
+    `processed_data_unfiltered`.`sold_to_num_acct_id`,
+    `processed_data_unfiltered`.`sold_to_num_acct_name`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`BILLTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_id`,
+    `processed_data_unfiltered`.`SHIPTO_NUM_acct_name`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_id`,
+    `processed_data_unfiltered`.`ACCOUNT_NUMBER_acct_name`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_id`,
+    `processed_data_unfiltered`.`sf_cross_Pdct_name`,
+    `processed_data_unfiltered`.`Deal_type`,
+    `processed_data_unfiltered`.`Multiple_Group`,
+    `processed_data_unfiltered`.`PER_STUDENT_PRICE`,
+    `processed_data_unfiltered`.`NEW_YRLY_PRICE`,
+    `processed_data_unfiltered`.`NEW_MTHLY_PRICE`,
+    `processed_data_unfiltered`.`SELLING_PRICE`
+FROM `follet_data_migration`.`processed_data_unfiltered`
+where contract_id not in (
+select distinct contract_id from `follet_data_migration`.`apsen_error_records`
+) and contract_id not in (
+select distinct contract_id from `follet_data_migration`.`contracts_without_account_no`
+) and contract_id not in 
+(
+select contract_id from Filtered_contracts
+)"
+
+
+Group 1 -- 
+Target table name  - "SF_PUSH_DATA_input"
+(row3.Deal_type.equals("District Member")||row3.Deal_type.equals("Single-Hosted"))
+
+
+Group 2 -- 
+Target table name  - "NOT_PROCESSED_DATA"
+All other data other than the 1st Group
+
+
+---------------------
+
+"Full_contract_not_processed"
+Target Table "Full_contract_not_processed"
+"Full_contract_not_processed"
+
+
+
+"select * from processed_data_unfiltered where contract_id not in 
+(
+select distinct  contract_id from sf_push_data_input 
+) and contract_id not in 
+(
+select contract_id from `apsen_error_records`
+) and contract_id not in 
+(
+select contract_id from `contracts_without_account_no`
+)"
+
+
+
+
+---- SF populatation of Quotes : "SBQQ__Quote__c"  --------------------------------
+
+"with group_contracts as 
+(select contract_id, count(1) as count from (
+select distinct contract_id, Count_School, ACCOUNT_NUMBER_CONCAT from sf_push_data_input  where Deal_type='District Member') t
+group by contract_id having count(1)>1),
+
+Integration_user as 
+(select id,name from sf_user where name='Integration User' and username like 'sfintegration@follett.com%'),
+
+total_school_count as
+(select contract_id, count(distinct (ACCOUNT_NUMBER)) as Count_School
+from 
+oracle_source_data where (contract_id, SUPPORT_ITEMNO) in 
+(select CONTRACT_ID,SUPPORT_ITEMNO from sf_push_data_input)
+group by contract_id),
+
+max_school as 
+(select CONTRACT_ID, Count_School, ACCOUNT_NUMBER_CONCAT,ACCOUNT_NUMBER_acct_id, ACCOUNT_NUMBER_acct_name from (
+select CONTRACT_ID , (Count_School) as Count_School ,ACCOUNT_NUMBER_CONCAT,ACCOUNT_NUMBER_acct_id, ACCOUNT_NUMBER_acct_name, 
+rank() OVER ( partition by CONTRACT_ID order by Count_School desc ) AS rank_school_count,
+ROW_NUMBER() OVER ( partition by CONTRACT_ID order by Count_School desc )  as row_school_count
+from sf_push_data_input) t 
+where rank_school_count=1 and row_school_count=1),
+
+cte2 as
+(select distinct sf_push_data_input.CONTRACT_ID, sf_push_data_input.SOLDTO_NUM,sf_push_data_input.sold_to_num_acct_id,sf_push_data_input.sold_to_num_acct_name,
+sf_push_data_input.BILLTO_NUM, sf_push_data_input.BILLTO_NUM_acct_id, 
+sf_push_data_input.BILLTO_NUM_acct_name, sf_push_data_input.SHIPTO_NUM, sf_push_data_input.SHIPTO_NUM_acct_name,sf_push_data_input.SHIPTO_NUM_acct_id,
+max_school.Count_School, max_school.ACCOUNT_NUMBER_CONCAT, max_school.ACCOUNT_NUMBER_acct_id, max_school.ACCOUNT_NUMBER_acct_name
+ from sf_push_data_input, max_school
+where sf_push_data_input.CONTRACT_ID=max_school.CONTRACT_ID),
+
+Quantity_UOM_Student as 
+(select src.contract_id,
+max(src.student_count) as Student_Count__c
+from `follet_data_migration`.`processed_data_unfiltered` src,
+`follet_data_migration`.`sf_cross_product` cross_product 
+where src.sf_cross_Pdct_id=cross_product.id 
+and cross_product.Quantity_UOM__c='Students'
+group by contract_id)
+
+select cte2.CONTRACT_ID,  cte2.SOLDTO_NUM,cte2.sold_to_num_acct_id,cte2.sold_to_num_acct_name,
+cte2.BILLTO_NUM, cte2.BILLTO_NUM_acct_id, 
+cte2.BILLTO_NUM_acct_name, cte2.SHIPTO_NUM, cte2.SHIPTO_NUM_acct_name,cte2.SHIPTO_NUM_acct_id,
+Quantity_UOM_Student.Student_Count__c as student_count, 
+max_school.Count_School as Count_School,
+cte2.ACCOUNT_NUMBER_CONCAT, cte2.ACCOUNT_NUMBER_acct_id, 
+case when group_contracts.contract_id is not null then  'OVERWRITTEN BY QUOTE LINE GROUPS' else cte2.ACCOUNT_NUMBER_acct_name end as ACCOUNT_NUMBER_acct_name, 
+case when DM.contract_id is null then 'false' else 'true' end as IS_District_Member, Integration_user.id as Owner_id
+from cte2
+inner join total_school_count
+on total_school_count.contract_id=cte2.CONTRACT_ID
+left join 
+(select distinct contract_id from sf_push_data_input where deal_type='District Member') DM
+on cte2.contract_id=DM.CONTRACT_ID
+left join group_contracts
+on group_contracts.contract_id=cte2.contract_id
+left join Integration_user
+on Integration_user.name='Integration User'
+left join Quantity_UOM_Student
+on Quantity_UOM_Student.contract_id=cte2.contract_id
+left join max_school
+on max_school.contract_id=cte2.contract_id 
+
+"Talend Transformation Code -- 
+MYSQL_INPUT.sold_to_num_acct_id  -- SBQQ__Account__c
+MYSQL_INPUT.BILLTO_NUM_acct_name  -- SBQQ__BillingName__c
+context.Primary_contact -- SBQQ__PrimaryContact__c
+Boolean. valueOf("true")  -- SBQQ__Primary__c
+MYSQL_INPUT.SHIPTO_NUM_acct_name -- SBQQ__ShippingName__c
+"Accepted"  -- SBQQ__Status__c
+MYSQL_INPUT.ACCOUNT_NUMBER_acct_name  -- Covered_Facilities__c
+String.valueOf(MYSQL_INPUT.BILLTO_NUM) -- BillTo_Oracle__c
+MYSQL_INPUT.BILLTO_NUM_acct_id -- BillTo__c
+MYSQL_INPUT.ACCOUNT_NUMBER_CONCAT -- Covered_Schools_Oracle__c
+Boolean.valueOf( MYSQL_INPUT.IS_District_Member) -- Is_This_A_District_Field__c
+MYSQL_INPUT.Count_School -- School_Count__c
+String.valueOf(MYSQL_INPUT.SHIPTO_NUM)  -- ShipTo_Oracle__c
+MYSQL_INPUT.SHIPTO_NUM_acct_id -- ShipTo__c
+MYSQL_INPUT.ACCOUNT_NUMBER_acct_id -- Covered_School_Account_ID_s__c
+String.valueOf(MYSQL_INPUT.SOLDTO_NUM)  -- SoldTo_Oracle__c
+String.valueOf(MYSQL_INPUT.CONTRACT_ID) -- TEMP_ID__c
+"Renewal"  -- Document_Type__c
+MYSQL_INPUT.Owner_id -- OwnerId
+MYSQL_INPUT.student_count  -- Student_Count__c
+
+
